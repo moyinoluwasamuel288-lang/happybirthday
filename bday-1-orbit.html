@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Another Trip Around the Sun</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,300;0,400;1,300;1,400&family=Spectral+SC:wght@300&display=swap" rel="stylesheet">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:100%; height:100%; background:#04060d; overflow:hidden; font-family:'Spectral',serif; }
+  canvas { position:fixed; inset:0; display:block; }
+  .overlay {
+    position:fixed; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:flex-start;
+    text-align:center; padding:9vh 24px 0; pointer-events:none;
+  }
+  .overlay::before {
+    content:''; position:absolute; top:0; left:50%; transform:translateX(-50%);
+    width:min(640px,90vw); height:230px;
+    background: radial-gradient(ellipse 60% 70% at 50% 30%, rgba(2,3,8,0.55), transparent 75%);
+    z-index:-1;
+  }
+  .line {
+    color:#f4f7ff; font-weight:400; font-size:clamp(17px,4.4vw,26px); line-height:1.6;
+    opacity:0; transform:translateY(10px);
+    transition:opacity 1.1s ease, transform 1.1s ease;
+    max-width:560px;
+    text-shadow: 0 2px 6px rgba(0,0,0,0.9), 0 0 22px rgba(0,0,0,0.7);
+  }
+  .line.visible { opacity:1; transform:translateY(0); }
+  .line.dim { color:rgba(244,247,255,0.7); font-size:clamp(14px,3.4vw,18px); }
+  .finale {
+    position:fixed; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    opacity:0; transition:opacity 1.8s ease; pointer-events:none; text-align:center; padding:24px;
+  }
+  .finale.show { opacity:1; }
+  .finale h1 {
+    font-family:'Spectral SC', serif; font-weight:300; letter-spacing:0.04em;
+    font-size:clamp(34px,9vw,62px); color:#f5d99b;
+    text-shadow:0 0 40px rgba(245,217,155,0.6), 0 0 90px rgba(245,217,155,0.25);
+  }
+  .finale p { margin-top:18px; font-size:clamp(14px,3.2vw,18px); color:rgba(245,217,155,0.75); font-style:italic; font-weight:300; }
+  .replay {
+    margin-top:38px; pointer-events:all;
+    background:transparent; border:1px solid rgba(245,217,155,0.35); color:rgba(245,217,155,0.8);
+    font-family:'Spectral',serif; font-style:italic; font-size:13px; letter-spacing:0.08em;
+    padding:10px 22px; border-radius:2px; cursor:pointer; transition:all .3s ease;
+  }
+  .replay:hover { background:rgba(245,217,155,0.08); box-shadow:0 0 24px rgba(245,217,155,0.2); }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="overlay" id="overlay"></div>
+<div class="finale" id="finale">
+  <h1>Happy Birthday</h1>
+  <p>here's to another trip around the sun.</p>
+  <button class="replay" onclick="location.reload()">↺ once more</button>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W,H,DPR = Math.min(window.devicePixelRatio||1,2);
+function resize(){
+  W = innerWidth; H = innerHeight;
+  canvas.width = W*DPR; canvas.height = H*DPR;
+  canvas.style.width = W+'px'; canvas.style.height = H+'px';
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+resize(); addEventListener('resize', resize);
+
+// starfield
+const stars = [];
+for(let i=0;i<220;i++){
+  stars.push({x:Math.random(), y:Math.random(), r:Math.random()*1.3+0.2, phase:Math.random()*Math.PI*2, speed:Math.random()*0.02+0.006});
+}
+
+// orbit params
+const cx = () => W/2, cy = () => H/2;
+const A = () => Math.min(W,H)*0.30;   // semi-major
+const B = () => Math.min(W,H)*0.19;   // semi-minor
+let angle = 0;
+const trail = [];
+let sunPulse = 0;
+let flareStart = null;
+const START = performance.now();
+const ORBIT_DURATION_BEFORE_FLARE = 12800; // ms until sun flares
+
+function drawSun(t, flareProgress){
+  const baseR = Math.min(W,H)*0.052;
+  const r = baseR * (1 + Math.sin(t*0.0016)*0.04) * (1 + flareProgress*1.6);
+  const glowR = r * (3.2 + flareProgress*3.5);
+  const grad = ctx.createRadialGradient(cx(),cy(),r*0.2,cx(),cy(),glowR);
+  grad.addColorStop(0, `rgba(255,238,190,${0.95})`);
+  grad.addColorStop(0.25, `rgba(255,205,120,${0.55+flareProgress*0.3})`);
+  grad.addColorStop(1, 'rgba(255,205,120,0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath(); ctx.arc(cx(),cy(),glowR,0,Math.PI*2); ctx.fill();
+
+  ctx.beginPath(); ctx.arc(cx(),cy(),r,0,Math.PI*2);
+  const coreGrad = ctx.createRadialGradient(cx()-r*0.2,cy()-r*0.2,r*0.05,cx(),cy(),r);
+  coreGrad.addColorStop(0,'#fff9e8'); coreGrad.addColorStop(1,'#f5c56a');
+  ctx.fillStyle = coreGrad; ctx.fill();
+}
+
+function frame(now){
+  const elapsed = now - START;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle = '#04060d';
+  ctx.fillRect(0,0,W,H);
+
+  // stars
+  stars.forEach(s=>{
+    const op = 0.15 + 0.6*Math.abs(Math.sin(now*s.speed + s.phase));
+    ctx.beginPath();
+    ctx.arc(s.x*W, s.y*H, s.r, 0, Math.PI*2);
+    ctx.fillStyle = `rgba(223,230,245,${op})`;
+    ctx.fill();
+  });
+
+  let flareProgress = 0;
+  if(elapsed > ORBIT_DURATION_BEFORE_FLARE){
+    flareProgress = Math.min(1, (elapsed - ORBIT_DURATION_BEFORE_FLARE)/2200);
+  }
+
+  drawSun(now, flareProgress);
+
+  // orbit path (faint ellipse)
+  ctx.beginPath();
+  ctx.ellipse(cx(), cy(), A(), B(), 0, 0, Math.PI*2);
+  ctx.strokeStyle = 'rgba(180,190,220,0.10)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  if(flareProgress < 1){
+    angle += 0.010 * (1 - flareProgress*0.7);
+    const px = cx() + Math.cos(angle)*A();
+    const py = cy() + Math.sin(angle)*B();
+    trail.push({x:px,y:py, age:0});
+    if(trail.length > 70) trail.shift();
+
+    trail.forEach((p,i)=>{
+      p.age++;
+      const op = (i/trail.length) * 0.5;
+      ctx.beginPath();
+      ctx.arc(p.x,p.y, 1.6, 0, Math.PI*2);
+      ctx.fillStyle = `rgba(170,200,255,${op})`;
+      ctx.fill();
+    });
+
+    // planet
+    ctx.beginPath();
+    ctx.arc(px,py, 5.5, 0, Math.PI*2);
+    const pg = ctx.createRadialGradient(px-2,py-2,0.5,px,py,6);
+    pg.addColorStop(0,'#cfe0ff'); pg.addColorStop(1,'#6f89c9');
+    ctx.fillStyle = pg; ctx.fill();
+    ctx.beginPath(); ctx.arc(px,py,9,0,Math.PI*2);
+    ctx.strokeStyle='rgba(170,200,255,0.25)'; ctx.lineWidth=1; ctx.stroke();
+  } else {
+    // fade out trail as flare consumes scene
+    document.getElementById('finale').classList.add('show');
+  }
+
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// text sequence
+const lines = [
+  { text:"Every year, this exact same thing happens.", delay: 900 },
+  { text:"You circle the same sun.", delay: 2600 },
+  { text:"The same 365 days —", delay: 4300, dim:true },
+  { text:"give or take a little light, a little dark.", delay: 5600, dim:true },
+  { text:"And somehow, you still come back around", delay: 7600 },
+  { text:"a little more you than before.", delay: 9200 },
+];
+const overlay = document.getElementById('overlay');
+lines.forEach(({text,delay,dim}) => {
+  const el = document.createElement('div');
+  el.className = 'line' + (dim ? ' dim' : '');
+  el.textContent = text;
+  overlay.appendChild(el);
+  setTimeout(()=> el.classList.add('visible'), delay);
+  setTimeout(()=> el.classList.remove('visible'), delay + 2200);
+});
+</script>
+</body>
+</html>
